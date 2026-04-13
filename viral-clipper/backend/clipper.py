@@ -97,12 +97,14 @@ def _logo_position_expr(position: str, margin: int) -> tuple[str, str]:
     """
     m = margin
     positions = {
-        "top-left":     (f"{m}",       f"{m}"),
-        "top-right":    (f"W-w-{m}",   f"{m}"),
-        "bottom-left":  (f"{m}",       f"H-h-{m}"),
-        "bottom-right": (f"W-w-{m}",   f"H-h-{m}"),
+        "top-left":      (f"{m}",         f"{m}"),
+        "top-center":    (f"(W-w)/2",     f"{m}"),
+        "top-right":     (f"W-w-{m}",     f"{m}"),
+        "bottom-left":   (f"{m}",         f"H-h-{m}"),
+        "bottom-center": (f"(W-w)/2",     f"H-h-{m}"),
+        "bottom-right":  (f"W-w-{m}",     f"H-h-{m}"),
     }
-    return positions.get(position, (f"{m}", f"{m}"))
+    return positions.get(position, (f"(W-w)/2", f"{m}"))
 
 
 def _build_filtergraph(
