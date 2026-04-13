@@ -1,6 +1,7 @@
 """
 Video clipping and reformatting module.
 Cuts source video to clip boundaries and reformats to 9:16 (1080×1920) vertical.
+Supports watermark/logo overlay via ffmpeg filter_complex.
 """
 
 import logging
@@ -18,6 +19,11 @@ from config import (
     OUTPUT_HEIGHT,
     OUTPUT_PRESET,
     OUTPUT_WIDTH,
+    WATERMARK_MARGIN,
+    WATERMARK_OPACITY,
+    WATERMARK_PATH,
+    WATERMARK_POSITION,
+    WATERMARK_WIDTH,
 )
 from utils import slugify
 
@@ -49,26 +55,21 @@ def _ffprobe_dimensions(video_path: Path) -> tuple[int, int]:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode != 0 or not result.stdout.strip():
-        return (1920, 1080)  # Assume 1080p landscape as fallback
+        return (1920, 1080)
     parts = result.stdout.strip().split(",")
     return int(parts[0]), int(parts[1])
 
 
 def _detect_face_center(video_path: Path, timestamp: float) -> Optional[tuple[int, int]]:
-    """
-    Use OpenCV to detect the dominant face in a frame and return its center (x, y).
-    Returns None if OpenCV is unavailable or no face is detected.
-    """
+    """Use OpenCV to detect the dominant face in a frame. Returns None if unavailable."""
     try:
         import cv2
-        import numpy as np
     except ImportError:
         return None
 
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    frame_idx = int(timestamp * fps)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, int(timestamp * fps))
     ret, frame = cap.read()
     cap.release()
 
@@ -83,69 +84,118 @@ def _detect_face_center(video_path: Path, timestamp: float) -> Optional[tuple[in
     if len(faces) == 0:
         return None
 
-    # Pick the largest face
     faces_sorted = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
     x, y, w, h = faces_sorted[0]
-    center_x = x + w // 2
-    center_y = y + h // 2
-    logger.debug(f"Face detected at ({center_x}, {center_y})")
-    return (center_x, center_y)
+    logger.debug(f"Face detected at ({x + w // 2}, {y + h // 2})")
+    return (x + w // 2, y + h // 2)
 
 
-def _build_vertical_filter(
+def _logo_position_expr(position: str, margin: int) -> tuple[str, str]:
+    """
+    Return ffmpeg (x, y) overlay expressions for the given position string.
+    Uses W/H (output dimensions) and w/h (logo dimensions).
+    """
+    m = margin
+    positions = {
+        "top-left":     (f"{m}",       f"{m}"),
+        "top-right":    (f"W-w-{m}",   f"{m}"),
+        "bottom-left":  (f"{m}",       f"H-h-{m}"),
+        "bottom-right": (f"W-w-{m}",   f"H-h-{m}"),
+    }
+    return positions.get(position, (f"{m}", f"{m}"))
+
+
+def _build_filtergraph(
     src_w: int,
     src_h: int,
-    face_center: Optional[tuple[int, int]] = None,
-) -> str:
+    face_center: Optional[tuple[int, int]],
+    ass_file: Optional[Path],
+    logo_path: Optional[Path],
+    logo_input_idx: int = 1,
+) -> tuple[str, bool]:
     """
-    Build an ffmpeg filtergraph string that converts a source frame of (src_w × src_h)
-    to 1080×1920 vertical format using one of these strategies:
+    Build the complete ffmpeg filtergraph.
 
-    1. If source is already taller than wide → pad/scale directly.
-    2. If source is landscape (wider than tall):
-       a. Smart crop centered on face (if detected)
-       b. Centered crop otherwise
-       Blurred-background fill for letterboxing edges.
+    Returns:
+        (filter_string, use_filter_complex)
+        - use_filter_complex=True  → use -filter_complex + -map "[out]"
+        - use_filter_complex=False → use -vf
     """
     target_w = OUTPUT_WIDTH    # 1080
     target_h = OUTPUT_HEIGHT   # 1920
-    target_ratio = target_w / target_h  # 9/16 ≈ 0.5625
-
+    target_ratio = target_w / target_h
     src_ratio = src_w / src_h
 
+    use_complex = (logo_path is not None) or (
+        ass_file is not None and src_ratio > target_ratio
+    )
+
+    # ── Base video filter ─────────────────────────────────────────────────────
     if src_ratio <= target_ratio:
-        # Already portrait-ish — scale and pad vertically
-        return (
-            f"scale={target_w}:-2,"
+        # Portrait/square source → simple scale + pad
+        base = (
+            f"[0:v]scale={target_w}:-2,"
             f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"fps={OUTPUT_FPS}"
+            f"fps={OUTPUT_FPS}[base]"
+        )
+    else:
+        # Landscape source → blur background + foreground crop
+        crop_w = int(src_h * target_ratio)
+        crop_h = src_h
+        crop_x = (
+            max(0, min(face_center[0] - crop_w // 2, src_w - crop_w))
+            if face_center else (src_w - crop_w) // 2
+        )
+        base = (
+            f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{target_h},"
+            f"gblur=sigma=30[bg];"
+            f"[0:v]crop={crop_w}:{crop_h}:{crop_x}:0,"
+            f"scale={target_w}:-2[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,"
+            f"fps={OUTPUT_FPS}[base]"
         )
 
-    # Landscape source → crop to 9:16
-    # Crop width from height: crop_w = src_h * (9/16)
-    crop_w = int(src_h * target_ratio)
-    crop_h = src_h
+    # ── Subtitle filter ────────────────────────────────────────────────────────
+    after_subs = "[base]"
+    subs_part = ""
+    if ass_file and ass_file.exists():
+        escaped = str(ass_file).replace("\\", "/")
+        # On Windows, drive letter colon must be escaped for ffmpeg filter
+        if len(escaped) > 1 and escaped[1] == ":":
+            escaped = escaped[0] + "\\:" + escaped[2:]
+        subs_part = f"[base]subtitles='{escaped}'[subbed]"
+        after_subs = "[subbed]"
 
-    if face_center:
-        cx = face_center[0]
-        # Center crop on face, clamp to valid range
-        crop_x = max(0, min(cx - crop_w // 2, src_w - crop_w))
-    else:
-        crop_x = (src_w - crop_w) // 2
-    crop_y = 0
+    # ── Logo filter ────────────────────────────────────────────────────────────
+    logo_part = ""
+    out_label = after_subs
+    if logo_path and logo_path.exists():
+        lx, ly = _logo_position_expr(WATERMARK_POSITION, WATERMARK_MARGIN)
+        alpha = max(0.0, min(1.0, WATERMARK_OPACITY))
+        logo_part = (
+            f"[{logo_input_idx}:v]"
+            f"scale={WATERMARK_WIDTH}:-1,"
+            f"format=rgba,"
+            f"colorchannelmixer=aa={alpha:.2f}"
+            f"[logo];"
+            f"{after_subs}[logo]overlay={lx}:{ly}[out]"
+        )
+        out_label = "[out]"
 
-    # Blurred background approach: scale full frame to target, blur it,
-    # then overlay the cropped+scaled foreground centred on top.
-    blur_filter = (
-        f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-        f"crop={target_w}:{target_h},"
-        f"gblur=sigma=30[bg];"
-        f"[0:v]crop={crop_w}:{crop_h}:{crop_x}:{crop_y},"
-        f"scale={target_w}:-2[fg];"
-        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,"
-        f"fps={OUTPUT_FPS}"
-    )
-    return blur_filter
+    # ── Assemble ──────────────────────────────────────────────────────────────
+    if not use_complex and not subs_part and not logo_part:
+        # Simple -vf mode: strip leading [0:v] tag and trailing [base] tag
+        simple = base.replace("[0:v]", "").rstrip("[base]").rstrip(";")
+        # For the landscape blur case we still need filter_complex
+        if ";" in base:
+            use_complex = True
+        else:
+            return simple, False
+
+    parts = [p for p in [base, subs_part, logo_part] if p]
+    filter_str = ";".join(parts)
+    return filter_str, True
 
 
 def cut_and_format(
@@ -153,17 +203,20 @@ def cut_and_format(
     start_time: float,
     end_time: float,
     output_path: Path,
-    subtitle_filter: Optional[str] = None,
+    ass_file: Optional[Path] = None,
+    logo_path: Optional[Path] = None,
 ) -> Path:
     """
-    Cut video from *start_time* to *end_time* and reformat to 1080×1920 vertical.
+    Cut video from *start_time* to *end_time*, reformat to 1080×1920 vertical,
+    optionally burn subtitles and overlay a watermark logo.
 
     Args:
-        video_path:      Source video file.
-        start_time:      Clip start in seconds (with padding already applied).
-        end_time:        Clip end in seconds.
-        output_path:     Destination MP4 path.
-        subtitle_filter: Optional ffmpeg drawtext / ASS filter string to burn in.
+        video_path:  Source video file.
+        start_time:  Clip start in seconds.
+        end_time:    Clip end in seconds.
+        output_path: Destination MP4 path.
+        ass_file:    Optional .ass subtitle file to burn in.
+        logo_path:   Optional logo image (PNG with transparency recommended).
 
     Returns:
         Path to the generated clip file.
@@ -174,31 +227,48 @@ def cut_and_format(
     if not shutil.which("ffmpeg"):
         raise ClipError("ffmpeg is not installed or not found in PATH.")
 
-    # Apply padding
     padded_start = max(0.0, start_time - CLIP_PADDING_SECONDS)
     padded_end = end_time + CLIP_PADDING_SECONDS
-
     duration = padded_end - padded_start
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Detect source dimensions
     src_w, src_h = _ffprobe_dimensions(video_path)
-    logger.debug(f"Source dimensions: {src_w}×{src_h}")
-
-    # Try face detection at midpoint
     midpoint = padded_start + duration / 2
     face_center = _detect_face_center(video_path, midpoint)
 
-    vf = _build_vertical_filter(src_w, src_h, face_center)
+    # Resolve effective logo path (config fallback)
+    effective_logo = logo_path or WATERMARK_PATH
+    if effective_logo and not effective_logo.exists():
+        logger.warning(f"Logo file not found, skipping watermark: {effective_logo}")
+        effective_logo = None
 
-    if subtitle_filter:
-        vf = f"{vf},{subtitle_filter}" if ";" not in vf else f"{vf}[out];[out]{subtitle_filter}"
+    filter_str, use_complex = _build_filtergraph(
+        src_w=src_w,
+        src_h=src_h,
+        face_center=face_center,
+        ass_file=ass_file,
+        logo_path=effective_logo,
+        logo_input_idx=1,
+    )
 
-    _ffmpeg(
+    # Build ffmpeg arguments
+    cmd_args: list[str] = [
         "-ss", str(padded_start),
         "-i", str(video_path),
+    ]
+
+    if effective_logo:
+        cmd_args += ["-i", str(effective_logo)]
+
+    if use_complex:
+        # Determine the output label
+        out_label = "[out]" if effective_logo else ("[subbed]" if ass_file else "[base]")
+        cmd_args += ["-filter_complex", filter_str, "-map", out_label]
+    else:
+        cmd_args += ["-vf", filter_str]
+
+    cmd_args += [
         "-t", str(duration),
-        "-vf", vf,
         "-c:v", OUTPUT_CODEC,
         "-preset", OUTPUT_PRESET,
         "-crf", str(OUTPUT_CRF),
@@ -206,19 +276,18 @@ def cut_and_format(
         "-b:a", "128k",
         "-movflags", "+faststart",
         str(output_path),
-    )
+    ]
 
-    logger.info(f"Clip saved → {output_path} ({duration:.1f}s)")
+    _ffmpeg(*cmd_args)
+    logger.info(
+        f"Clip saved → {output_path} ({duration:.1f}s)"
+        + (f" [logo: {effective_logo.name}]" if effective_logo else "")
+    )
     return output_path
 
 
 def generate_thumbnail(video_path: Path, thumbnail_path: Path, timestamp: float = 1.0) -> Path:
-    """
-    Extract a single frame from *video_path* at *timestamp* seconds as a JPEG thumbnail.
-
-    Returns:
-        Path to the thumbnail file.
-    """
+    """Extract a frame from *video_path* as a JPEG thumbnail."""
     thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
     _ffmpeg(
         "-ss", str(timestamp),
@@ -232,13 +301,11 @@ def generate_thumbnail(video_path: Path, thumbnail_path: Path, timestamp: float 
 
 
 def build_clip_output_path(video_id: str, clip_index: int, title: str) -> Path:
-    """Return a standardized output path for a clip."""
     slug = slugify(title)
     return CLIPS_DIR / f"{video_id}_{clip_index:02d}_{slug}.mp4"
 
 
 def build_thumbnail_path(clip_path: Path) -> Path:
-    """Return the thumbnail path corresponding to a clip path."""
     return clip_path.with_suffix(".jpg")
 
 
@@ -250,9 +317,10 @@ def process_clip(
     start_time: float,
     end_time: float,
     ass_file: Optional[Path] = None,
+    logo_path: Optional[Path] = None,
 ) -> tuple[Path, Path]:
     """
-    Full pipeline: cut, format vertical, burn subtitles (if provided), generate thumbnail.
+    Full pipeline: cut → vertical reformat → subtitles → logo → thumbnail.
 
     Returns:
         Tuple of (clip_path, thumbnail_path).
@@ -266,22 +334,15 @@ def process_clip(
             generate_thumbnail(output_path, thumbnail_path)
         return output_path, thumbnail_path
 
-    # Build subtitle filter if ASS file provided
-    subtitle_filter = None
-    if ass_file and ass_file.exists():
-        # Use the subtitles filter — escape path for ffmpeg
-        escaped = str(ass_file).replace("\\", "/").replace(":", "\\:")
-        subtitle_filter = f"subtitles='{escaped}'"
-
     cut_and_format(
         video_path=video_path,
         start_time=start_time,
         end_time=end_time,
         output_path=output_path,
-        subtitle_filter=subtitle_filter,
+        ass_file=ass_file,
+        logo_path=logo_path,
     )
 
-    # Generate thumbnail from 1 second into the clip
     try:
         generate_thumbnail(output_path, thumbnail_path, timestamp=1.0)
     except ClipError as e:

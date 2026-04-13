@@ -5,6 +5,7 @@ Loads settings from .env file and provides typed access to all config values.
 
 import os
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -108,6 +109,23 @@ CORS_ORIGINS: list[str] = [
     "http://localhost:3000",
     "http://localhost:5173",
 ]
+
+# ─── Watermark / Logo ─────────────────────────────────────────────────────────
+# Path to your logo PNG file (transparent background recommended)
+_wm_path = os.getenv("WATERMARK_PATH", "")
+WATERMARK_PATH: Optional[Path] = Path(_wm_path) if _wm_path else None
+
+# Position: top-left | top-right | bottom-left | bottom-right
+WATERMARK_POSITION: str = os.getenv("WATERMARK_POSITION", "top-left")
+
+# Logo width in pixels (height is auto-calculated to preserve aspect ratio)
+WATERMARK_WIDTH: int = int(os.getenv("WATERMARK_WIDTH", "220"))
+
+# Opacity from 0.0 (invisible) to 1.0 (fully opaque)
+WATERMARK_OPACITY: float = float(os.getenv("WATERMARK_OPACITY", "1.0"))
+
+# Margin from the edge in pixels
+WATERMARK_MARGIN: int = int(os.getenv("WATERMARK_MARGIN", "30"))
 
 # ─── Download ─────────────────────────────────────────────────────────────────
 MAX_VIDEO_QUALITY: str = "1080"
