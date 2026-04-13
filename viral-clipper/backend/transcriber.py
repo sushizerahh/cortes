@@ -199,7 +199,7 @@ def transcribe(audio_path: Path, video_id: str, force: bool = False) -> Transcri
     with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(transcript.to_dict(), f, ensure_ascii=False, indent=2)
     logger.info(
-        f"[{video_id}] Transcript saved → {cache_path} "
+        f"[{video_id}] Transcript saved -> {cache_path} "
         f"({len(segments)} segments, {len(transcript.all_words)} words)"
     )
 

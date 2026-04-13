@@ -157,7 +157,7 @@ def download(url: str, force: bool = False) -> DownloadResult:
                 video_path = mp4_candidates[0]
             else:
                 raise DownloadError(f"Video file not found after download for {video_id}")
-        logger.info(f"[{video_id}] Video saved → {video_path}")
+        logger.info(f"[{video_id}] Video saved -> {video_path}")
 
     # ── Download / extract audio ──────────────────────────────────────────────
     if force or not audio_path.exists():
@@ -172,7 +172,7 @@ def download(url: str, force: bool = False) -> DownloadResult:
 
         if not audio_path.exists():
             raise DownloadError(f"Audio file not found after extraction for {video_id}")
-        logger.info(f"[{video_id}] Audio saved → {audio_path}")
+        logger.info(f"[{video_id}] Audio saved -> {audio_path}")
 
     return DownloadResult(video_id, video_path, audio_path, metadata)
 

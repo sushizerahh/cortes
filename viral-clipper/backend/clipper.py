@@ -282,7 +282,7 @@ def cut_and_format(
 
     _ffmpeg(*cmd_args)
     logger.info(
-        f"Clip saved → {output_path} ({duration:.1f}s)"
+        f"Clip saved -> {output_path} ({duration:.1f}s)"
         + (f" [logo: {effective_logo.name}]" if effective_logo else "")
     )
     return output_path
@@ -298,7 +298,7 @@ def generate_thumbnail(video_path: Path, thumbnail_path: Path, timestamp: float 
         "-q:v", "2",
         str(thumbnail_path),
     )
-    logger.debug(f"Thumbnail saved → {thumbnail_path}")
+    logger.debug(f"Thumbnail saved -> {thumbnail_path}")
     return thumbnail_path
 
 

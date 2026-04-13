@@ -383,7 +383,7 @@ def learning_cmd() -> None:
     if profile.get("learned_rules"):
         console.print("\n[bold cyan]Learned Rules:[/bold cyan]")
         for rule in profile["learned_rules"]:
-            console.print(f"  [dim]→[/dim] {rule}")
+            console.print(f"  [dim]->[/dim] {rule}")
 
 
 # ─── stats command ────────────────────────────────────────────────────────────

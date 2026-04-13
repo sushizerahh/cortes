@@ -220,7 +220,7 @@ def generate_ass(
             f.write(line + "\n")
 
     logger.info(
-        f"ASS subtitle file written → {output_path} "
+        f"ASS subtitle file written -> {output_path} "
         f"({len(clip_words)} words, {len(groups)} groups, style={style_name!r})"
     )
     return output_path

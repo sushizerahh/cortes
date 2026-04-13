@@ -2,21 +2,46 @@
 Shared utility helpers for ViralClipper.
 """
 
+import io
 import logging
 import re
 import sys
 import unicodedata
 from pathlib import Path
 
+# ─── Windows UTF-8 fix ───────────────────────────────────────────────────────
+# The Windows console uses cp1252 by default which can't encode many unicode
+# characters (arrows, emoji, etc.) used in log messages.
+# Force UTF-8 on stdout/stderr at import time.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except AttributeError:
+        # Fallback for older Python versions
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+
 # ─── Logging Setup ────────────────────────────────────────────────────────────
 
 def setup_logging(level: str = "INFO", log_file: Path | None = None) -> None:
     """Configure structured logging to console and optionally to file."""
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    console_handler = logging.StreamHandler(sys.stdout)
+    # Use errors="replace" so any remaining unencodable chars become "?"
+    if hasattr(console_handler.stream, "reconfigure"):
+        try:
+            console_handler.stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    handlers: list[logging.Handler] = [console_handler]
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(str(log_file)))
+        handlers.append(
+            logging.FileHandler(str(log_file), encoding="utf-8")
+        )
 
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
