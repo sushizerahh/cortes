@@ -1,0 +1,40 @@
+# Environment
+.env
+
+# Data (large files)
+data/downloads/
+data/clips/
+data/transcripts/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Logs
+logs/
+*.log
+
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

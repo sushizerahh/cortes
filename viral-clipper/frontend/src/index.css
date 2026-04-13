@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #0a0a0f;
+  color: #e5e7eb;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #12121a; }
+::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a4a; }
+
+/* Neon glow animation */
+@keyframes neon-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0,255,136,0.3); }
+  50% { box-shadow: 0 0 25px rgba(0,255,136,0.6); }
+}
+
+.neon-pulse { animation: neon-pulse 2s ease-in-out infinite; }
+
+/* Gradient border */
+.gradient-border {
+  border: 1px solid transparent;
+  background: linear-gradient(#1a1a26, #1a1a26) padding-box,
+              linear-gradient(135deg, #00FF88, #00aaff) border-box;
+}
+
+/* Score badge colors */
+.score-high { color: #00FF88; }
+.score-mid  { color: #fbbf24; }
+.score-low  { color: #ef4444; }
