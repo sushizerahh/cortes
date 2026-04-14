@@ -94,9 +94,26 @@ OUTPUT_PRESET: str = "slow"
 OUTPUT_CRF: int = 18
 CLIP_PADDING_SECONDS: float = 0.5
 
-# ─── Claude API ───────────────────────────────────────────────────────────────
+# ─── LLM Provider ────────────────────────────────────────────────────────────
+# Options: anthropic | groq | gemini | ollama
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
+
+# ─── Anthropic (Claude) ───────────────────────────────────────────────────────
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
-CLAUDE_MAX_TOKENS: int = 4096
+
+# ─── Groq (free tier) ────────────────────────────────────────────────────────
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ─── Google Gemini (free tier) ────────────────────────────────────────────────
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+# ─── Ollama (local / free) ────────────────────────────────────────────────────
+OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1")
+
+LLM_MAX_TOKENS: int = 4096
 TRANSCRIPT_CHUNK_SIZE: int = 50000  # characters per chunk
 
 # ─── API Server ───────────────────────────────────────────────────────────────

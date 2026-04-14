@@ -2,7 +2,15 @@
 yt-dlp>=2024.1.1
 openai-whisper>=20231117
 ffmpeg-python>=0.2.0
+
+# ─── LLM Providers (install only what you use) ────────────────────────────────
+# Anthropic Claude (paid)
 anthropic>=0.28.0
+# Groq - free tier, fast (recommended free option)
+groq>=0.9.0
+# Google Gemini - free tier
+google-generativeai>=0.7.0
+# Ollama - local/free (no package needed, uses built-in urllib)
 
 # ─── API server ────────────────────────────────────────────────────────────────
 fastapi>=0.111.0
@@ -22,5 +30,4 @@ python-dotenv>=1.0.1
 Pillow>=10.3.0
 
 # ─── Optional: face detection ─────────────────────────────────────────────────
-# Uncomment to enable smart face-centered crop in clipper.py
 # opencv-python-headless>=4.9.0
